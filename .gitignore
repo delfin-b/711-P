@@ -1,0 +1,7 @@
+__pycache__/
+*.xlsx
+main.py
+best_model.pth
+params
+
+
