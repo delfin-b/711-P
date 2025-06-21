@@ -28,6 +28,8 @@ class LatentToProfileAttentionDecoder(nn.Module):
         self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
         self.profile_len = profile_len
+        self.dropout = nn.Dropout(0.3)
+
 
         # Depth embeddings (learnable)
         self.depth_embeddings = nn.Embedding(profile_len, depth_embed_dim)
@@ -39,7 +41,7 @@ class LatentToProfileAttentionDecoder(nn.Module):
         self.input_fc = nn.Linear(depth_embed_dim + hidden_dim, hidden_dim)
 
         # LSTM decoder
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=2, batch_first=True) 
 
         # Output layer to predict VS value
         self.output_fc = nn.Linear(hidden_dim, 1)
@@ -58,19 +60,25 @@ class LatentToProfileAttentionDecoder(nn.Module):
         depth_embeds = self.depth_embeddings(depth_steps)  # [batch, profile_len, depth_embed_dim]
 
         # Initialize hidden and cell state
-        h_t = torch.zeros(1, batch_size, self.hidden_dim, device=z.device)
-        c_t = torch.zeros(1, batch_size, self.hidden_dim, device=z.device)
+        h_t = torch.zeros(2, batch_size, self.hidden_dim, device=z.device)
+        c_t = torch.zeros(2, batch_size, self.hidden_dim, device=z.device)
+
 
         outputs = []
         for t in range(self.profile_len):
             depth_embed = depth_embeds[:, t, :]  # [batch, depth_embed_dim]
 
             # Attention over z using current hidden state
-            context = self.attn(h_t.squeeze(0), z)  # [batch, hidden_dim]
+            context = self.attn(h_t[-1], z)
 
             # Combine context + depth embedding
             lstm_input = torch.relu(self.input_fc(torch.cat([depth_embed, context], dim=1)))  # [batch, hidden_dim]
             lstm_input = lstm_input.unsqueeze(1)  # [batch, 1, hidden_dim]
+
+            # Run LSTM one step with hidden state
+            lstm_out, (h_t, c_t) = self.lstm(lstm_input, (h_t, c_t))  # [batch, 1, hidden_dim]
+            lstm_out = self.dropout(lstm_out)  # Apply dropout AFTER LSTM step
+
 
             # Run LSTM one step
             output, (h_t, c_t) = self.lstm(lstm_input, (h_t, c_t))  # output: [batch, 1, hidden_dim]
